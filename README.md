@@ -59,10 +59,20 @@ RESEND_API_KEY=your_key
 ```bash
 streamlit run app.py
 ```
+## 📸 Screenshots
 
-## Future Enhancements
+### Home Page
 
-- Support multiple programming languages
-- Generate downloadable PDF reports
-- User authentication
-- Code history management
+![Home Page](screenshots/home.png)
+
+### OTP Verification
+
+![OTP Verification](screenshots/otp_verification.png)
+
+### Code Input
+
+![Code Input](screenshots/code_input.png)
+
+### Review Output
+
+![Review Output](screenshots/review_output.png)
