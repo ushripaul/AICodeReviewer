@@ -535,11 +535,11 @@ _qp_policy = st.query_params.get("policy")
 if _qp_policy in POLICY_CONTENT:
     st.session_state.show_policy = _qp_policy
 
-resend.api_key = st.secrets["resend.api_key"]
+resend_api_key = st.secrets["resend_api_key"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 def send_otp(receiver_email: str, otp: int) -> bool:
-    if not resend.api_key:
+    if not resend_api_key:
         st.error("Email service is not configured.")
         return False
     try:
