@@ -6,7 +6,7 @@ import re
 import requests
 import random
 import resend
-import sqlite3
+import psycopg2
 import json
 from datetime import datetime
 from typing import Optional, Tuple
@@ -17,11 +17,11 @@ from email.message import EmailMessage
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeware.db")
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             email TEXT,
             language TEXT,
             code TEXT,
@@ -35,19 +35,19 @@ def init_db():
     conn.close()
 
 def save_review(email: str, language: str, code: str, review: str, score: float, focus_areas: list):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
     c = conn.cursor()
     c.execute("""
         INSERT INTO reviews (email, language, code, review, score, focus_areas, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
     """, (email, language, code, review, score, json.dumps(focus_areas), datetime.now().strftime("%Y-%m-%d %H:%M")))
     conn.commit()
     conn.close()
 
 def get_reviews(email: str):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
     c = conn.cursor()
-    c.execute("SELECT * FROM reviews WHERE email=? ORDER BY created_at DESC", (email,))
+    c.execute("SELECT * FROM reviews WHERE email=%s ORDER BY created_at DESC", (email,))
     rows = c.fetchall()
     conn.close()
     return rows
