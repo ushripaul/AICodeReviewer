@@ -997,19 +997,25 @@ if code.strip():
                 st.warning(f"⚠ Execution not supported for {language}.")
             else:
                 lang_name, lang_version = lang_info
+
                 piston_response = requests.post(
-                    "http://127.0.0.1:2000/api/v2/execute",
+                    "https://api.onlinecompiler.io/api/v2/piston/execute",
+                    headers={
+                        "Authorization": st.secrets["ONLINE_COMPILER_API_KEY"],
+                        "Content-Type": "application/json"
+                    },
                     json={
                         "language": lang_name,
-                        "version": lang_version,
+                        "version": "*",
                         "files": [{"content": code}]
                     },
-                    timeout=15
+                    timeout=45
                 )
+
                 piston_response.raise_for_status()
                 result = piston_response.json()
                 run = result.get("run", {})
-                output = run.get("stdout") or run.get("stderr") or "No output"
+                output = run.get("output") or "No output"
                 st.code(output, language="text")
         except requests.exceptions.RequestException as ex:
             st.error(f"Execution Error: could not reach the code execution service ({str(ex)})")
