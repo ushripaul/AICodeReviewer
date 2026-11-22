@@ -1,3 +1,4 @@
+from PIL import Image, ImageDraw, ImageFont
 import os
 import streamlit as st
 import google.generativeai as genai
@@ -10,7 +11,8 @@ import json
 from datetime import datetime
 from typing import Optional, Tuple
 from streamlit_ace import st_ace
-
+import smtplib
+from email.message import EmailMessage
 # ── Database Setup ────────────────────────────────────────────────────────────
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeware.db")
 
@@ -184,10 +186,53 @@ def render_consent_line():
 </div>
 """, unsafe_allow_html=True)
 
-# ── Page config ───────────────────────────────────────────────────────────────
+# ── Codeware Gradient Logo ──
+size = 128
+logo = Image.new("RGBA", (size, size))
+draw = ImageDraw.Draw(logo)
+
+# Purple to pink gradient
+start_color = (109, 40, 217)   # Purple
+end_color = (251, 113, 133)    # Pink
+
+for y in range(size):
+    for x in range(size):
+        ratio = (x + y) / (2 * (size - 1))
+
+        color = tuple(
+            int(start_color[i] +
+                (end_color[i] - start_color[i]) * ratio)
+            for i in range(3)
+        )
+
+        draw.point((x, y), fill=color + (255,))
+
+# Rounded corners
+mask = Image.new("L", (size, size), 0)
+ImageDraw.Draw(mask).rounded_rectangle(
+    (0, 0, 127, 127),
+    radius=32,
+    fill=255
+)
+
+logo.putalpha(mask)
+
+# White coding symbol </>
+draw = ImageDraw.Draw(logo)
+
+draw.line([(48, 48), (28, 64), (48, 80)],
+          fill="white", width=7)
+
+draw.line([(80, 48), (100, 64), (80, 80)],
+          fill="white", width=7)
+
+draw.line([(72, 40), (56, 88)],
+          fill="white", width=7)
+
+# ── Page config ──
 st.set_page_config(
     page_title="Codeware · AI Code Reviewer",
-    page_icon="</>",
+    page_icon=logo,
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -539,26 +584,41 @@ resend_api_key = st.secrets["resend_api_key"]
 GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
 def send_otp(receiver_email: str, otp: int) -> bool:
-    if not resend_api_key:
-        st.error("Email service is not configured.")
-        return False
     try:
-        resend.Emails.send({
-            "from": "onboarding@resend.dev",
-            "to": receiver_email,
-            "subject": "Codeware - Your OTP Code",
-            "html": f"""
-<div style="font-family:Inter,sans-serif;padding:2rem;max-width:400px;">
-  <h2 style="color:#8B5CF6;">Codeware OTP</h2>
-  <p>Your one-time password is:</p>
-  <div style="font-size:2rem;font-weight:700;letter-spacing:8px;color:#8B5CF6;">{otp}</div>
-  <p style="color:#888;font-size:0.85rem;">Valid for 10 minutes. Do not share it with anyone.</p>
-</div>
-"""
-        })
+        sender_email = st.secrets["GMAIL_EMAIL"]
+        app_password = st.secrets["GMAIL_APP_PASSWORD"]
+
+        msg = EmailMessage()
+        msg["Subject"] = "Codeware - Your OTP Code"
+        msg["From"] = sender_email
+        msg["To"] = receiver_email
+
+        msg.set_content(
+            f"Your Codeware OTP is {otp}. "
+            "Valid for 10 minutes. Do not share it."
+        )
+
+        msg.add_alternative(f"""
+        <div style="font-family:Arial;padding:30px;">
+            <h2 style="color:#8B5CF6;">Codeware OTP</h2>
+            <p>Your one-time password is:</p>
+            <h1 style="color:#8B5CF6;
+                       letter-spacing:8px;">{otp}</h1>
+            <p>Valid for 10 minutes.</p>
+            <p>Do not share it with anyone.</p>
+        </div>
+        """, subtype="html")
+
+        with smtplib.SMTP_SSL(
+            "smtp.gmail.com", 465, timeout=20
+        ) as smtp:
+            smtp.login(sender_email, app_password)
+            smtp.send_message(msg)
+
         return True
-    except Exception as e:
-        st.error(f"Email Error: {str(e)}")
+
+    except Exception:
+        st.error("Unable to send OTP. Please try again.")
         return False
 
 if st.session_state.show_policy:
@@ -880,13 +940,9 @@ with left_col:
     with st.container(border=True):
         st.markdown('<p class="section-title">⚙ Review Settings</p>', unsafe_allow_html=True)
         language = st.selectbox(
-            "Programming Language",
-            ["Python", "HTML, CSS, JS", "Java", "C++", "TypeScript", "Go", "Rust", "Ruby",
-             "Kotlin", "PHP", "Bash", "OCaml", "VB", "Perl", "Pascal", "Swift", "Prolog",
-             "Ada", "D", "Cobol", "R", "Haskell", "Fortran", "Zig", "Lua", "Tcl", "Dart",
-             "Smalltalk", "Groovy", "SQLite", "C"],
-            label_visibility="visible"
-        )
+    "Select Programming Language",
+    ["Python", "Java", "C"]
+)
         focus = st.multiselect(
             "Focus Areas",
             ["Bugs", "Performance", "Security", "Best Practices", "Code Quality"],
@@ -932,38 +988,9 @@ if code.strip():
         st.markdown('<p class="section-title">⚙ Code Output</p>', unsafe_allow_html=True)
         try:
             LANGUAGE_MAP = {
-                "python":        ("python",      "3.10.0"),
-                "javascript":    ("javascript",  "18.15.0"),
-                "html, css, js": ("javascript",  "18.15.0"),
-                "java":          ("java",        "15.0.2"),
-                "c++":           ("c++",         "10.2.0"),
-                "typescript":    ("typescript",  "5.0.3"),
-                "go":            ("go",          "1.16.2"),
-                "rust":          ("rust",        "1.50.0"),
-                "ruby":          ("ruby",        "3.0.1"),
-                "kotlin":        ("kotlin",      "1.8.20"),
-                "php":           ("php",         "8.2.3"),
-                "bash":          ("bash",        "5.2.0"),
-                "r":             ("r",           "4.1.1"),
-                "dart":          ("dart",        "2.19.6"),
-                "swift":         ("swift",       "5.3.3"),
-                "lua":           ("lua",         "5.4.4"),
-                "perl":          ("perl",        "5.36.0"),
-                "c":             ("c",           "10.2.0"),
-                "haskell":       ("haskell",     "9.0.1"),
-                "ocaml":         ("ocaml",       "4.12.0"),
-                "groovy":        ("groovy",      "3.0.7"),
-                "fortran":       ("fortran",     "10.2.0"),
-                "zig":           ("zig",         "0.10.1"),
-                "tcl":           ("tcl",         "8.6.11"),
-                "prolog":        ("prolog",      "8.2.4"),
-                "cobol":         ("cobol",       "3.1.2"),
-                "d":             ("d",           "10.2.0"),
-                "pascal":        ("pascal",      "3.2.0"),
-                "vb":            ("vb",          "2.0.0"),
-                "ada":           ("ada",         "10.2.0"),
-                "sqlite":        ("sqlite",      "3.36.0"),
-                "smalltalk":     ("smalltalk",   "gst"),
+                "python": ("python", "3.10.0"),
+                "java": ("java", "15.0.2"),
+                "c": ("c", "10.2.0")
             }
             lang_info = LANGUAGE_MAP.get(language.lower())
             if lang_info is None:
@@ -971,8 +998,12 @@ if code.strip():
             else:
                 lang_name, lang_version = lang_info
                 piston_response = requests.post(
-                    "https://emkc.org/api/v2/piston/execute",
-                    json={"language": lang_name, "version": lang_version, "files": [{"content": code}]},
+                    "http://127.0.0.1:2000/api/v2/execute",
+                    json={
+                        "language": lang_name,
+                        "version": lang_version,
+                        "files": [{"content": code}]
+                    },
                     timeout=15
                 )
                 piston_response.raise_for_status()
@@ -998,16 +1029,34 @@ if review_btn:
             "### Bugs\n### Performance\n### Security\n### Best Practices\n### Code Quality"
         )
         prompt = (
-            "You are a senior software engineer performing a thorough code review.\n\n"
-            f"Review the following {language} code and provide structured feedback "
-            f"covering: {focus_str}.\n\n"
-            f"Format your response with clear sections using ONLY these exact headers:\n"
-            f"{headers}\n\n"
-            "End with a **Code Quality Score: X/10** line, where X is a number from 1-10.\n"
-            "Be specific, actionable, and concise. Use bullet points within each section.\n\n"
-            "Code to review:\n"
-            "~~~" + language.lower() + "\n"
-            + code + "\n~~~"
+                f"You are an expert {language} code reviewer.\n"
+                f"Review the following code strictly as {language}.\n"
+                "Do not apply rules from other programming languages.\n"
+                f"Focus on: {focus_str}.\n\n"
+
+                "Use ONLY these exact section headings:\n"
+                f"{headers}\n\n"
+
+                "Review rules:\n"
+                "1. Keep each section short: 1-2 bullet points maximum.\n"
+                "2. Bugs: Identify real errors only. If none, say 'No bugs found.'\n"
+                "3. Performance: Give one relevant observation.\n"
+                "4. Best Practices: Suggest only useful improvements.\n"
+                "5. Security: Mention actual or plausible risks, not generic lists.\n"
+                "6. Code Quality: Briefly assess readability and maintainability.\n"
+                "7. Never discuss Java when reviewing Python, or vice versa.\n"
+                "8. If the code is invalid for the selected language, explain why.\n"
+                "9. Do not invent bugs or claim the code was executed.\n"
+                "10. Avoid unnecessary explanations and repeated information.\n\n"
+
+                "End with exactly this format:\n"
+                "**Code Quality Score: X/10**\n"
+                "Replace X with a number from 1 to 10.\n"
+                "Score the code for the selected language only.\n\n"
+
+                "Code to review:\n"
+                "~~~" + language.lower() + "\n"
+                + code + "\n~~~"
         )
         spinner_placeholder = st.empty()
         spinner_placeholder.markdown(f"""
