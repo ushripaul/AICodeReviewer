@@ -17,7 +17,12 @@ from email.message import EmailMessage
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "codeware.db")
 
 def init_db():
-    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
+    conn = psycopg2.connect(
+        st.secrets["DATABASE_URL"],
+        sslmode="require",
+        connect_timeout=10,
+        hostaddr="3.1.167.181"
+    )
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS reviews (
@@ -35,7 +40,12 @@ def init_db():
     conn.close()
 
 def save_review(email: str, language: str, code: str, review: str, score: float, focus_areas: list):
-    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
+    conn = psycopg2.connect(
+        st.secrets["DATABASE_URL"],
+        sslmode="require",
+        connect_timeout=10,
+        hostaddr="3.1.167.181"
+    )
     c = conn.cursor()
     c.execute("""
         INSERT INTO reviews (email, language, code, review, score, focus_areas, created_at)
@@ -45,7 +55,12 @@ def save_review(email: str, language: str, code: str, review: str, score: float,
     conn.close()
 
 def get_reviews(email: str):
-    conn = psycopg2.connect(st.secrets["DATABASE_URL"], sslmode="require")
+    conn = psycopg2.connect(
+        st.secrets["DATABASE_URL"],
+        sslmode="require",
+        connect_timeout=10,
+        hostaddr="3.1.167.181"
+    )
     c = conn.cursor()
     c.execute("SELECT * FROM reviews WHERE email=%s ORDER BY created_at DESC", (email,))
     rows = c.fetchall()
@@ -556,7 +571,7 @@ st.markdown(f"""
   <div class="hero-icon" style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#fff;">&lt;/&gt;</div>
   <div>
     <div class="hero-title">Codeware</div>
-    <div class="hero-sub">AI-powered code reviewer · Powered by Gemini 2.5 Flash</div>
+    <div class="hero-sub">AI-powered code reviewer</div>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -787,6 +802,7 @@ with col_signout:
         st.session_state.otp_sent = False
         st.session_state.otp = None
         st.session_state.otp_email = ""
+        st.session_state.pop("fix_result", None)
         st.rerun()
 
 st.markdown('<hr class="divider"/>', unsafe_allow_html=True)
@@ -844,7 +860,48 @@ def render_score(score: float) -> None:
   <div style="font-size:0.72rem;color:{LABEL};font-family:'JetBrains Mono',monospace;">/ 10</div>
 </div>
 """, unsafe_allow_html=True)
+def fix_code(code, language):
+    prompt = f"""
+    Act as an expert {language} software engineer.
 
+    Analyze the following source code:
+    {code}
+
+    Your tasks:
+1. Fix syntax and logical errors.
+2. Improve code performance where possible.
+3. Improve readability.
+4. Fix potential security vulnerabilities.
+5. Preserve the original functionality.
+6. Return the complete corrected code.
+7. Detect functions that are defined but never called.
+8. If the code is clearly a standalone program intended to display output, add the necessary function call.
+9. Fix logical errors that prevent the intended output.
+10. Do not add function calls to reusable libraries or utility functions unnecessarily.
+11. Ensure the corrected code can run and produce the intended result when appropriate.
+
+    Return only the corrected source code.
+    Do not include markdown or explanations.
+    """
+
+    try:
+        response = model.generate_content(prompt)
+
+        if response and response.text:
+            fixed_code = response.text.strip()
+            fixed_code = re.sub(
+                r"^```[^\n]*\n|\n```$",
+                "",
+                fixed_code
+            )
+            return fixed_code.strip()
+
+        st.error("No corrected code received.")
+        return None
+
+    except Exception:
+        st.error("Code generation failed. Please try again.")
+        return None
 def render_result(response_text: str) -> None:
     if not response_text:
         st.error("Empty response received.")
@@ -981,6 +1038,121 @@ with right_col:
         ) or ""
         st.markdown('</div>', unsafe_allow_html=True)
     review_btn = st.button("🔍  Review Code", use_container_width=True, key="review_btn")
+    fix_btn = st.button(
+        "✨ Fix & Optimize Code",
+        use_container_width=True,
+        key="fix_code_btn"
+    )
+    if fix_btn:
+        if not code.strip():
+            st.warning("Please enter some code first.")
+        else:
+            with st.spinner("AI is fixing your code..."):
+                corrected = fix_code(code, language)
+
+            if corrected:
+                st.session_state["fix_result"] = {
+                    "original": code,
+                    "corrected": corrected,
+                    "language": language,
+                    "owner": st.session_state.username
+                }
+
+    result = st.session_state.get("fix_result")
+
+    if (
+        result
+        and result["owner"] == st.session_state.username
+        and result["original"] == code
+        and result["language"] == language
+    ):
+        with st.container(border=True):
+            st.subheader("✨ AI Code Fixer")
+            st.success("AI-generated improved code is ready.")
+            st.caption("Review and test the corrected code before using it.")
+
+            original_col, fixed_col = st.columns(2)
+
+            with original_col:
+                st.markdown("**Original Code**")
+                st.code(
+                    result["original"],
+                    language=language.lower()
+                )
+
+            with fixed_col:
+                st.markdown("**Improved Code**")
+                st.code(
+                    result["corrected"],
+                    language=language.lower()
+                )
+
+            extensions = {
+                "python": "py",
+                "java": "java",
+                "c": "c"
+            }
+
+            ext = extensions.get(language.lower(), "txt")
+
+            st.download_button(
+                label="⬇️ Download Improved Code",
+                data=result["corrected"],
+                file_name=f"improved_code.{ext}",
+                mime="text/plain",
+                key="download_fixed_code"
+            )
+            if st.button("▶ Run Fixed Code", key="run_fixed_code_btn"):
+                language_map = {
+                    "python": "python",
+                    "java": "java",
+                    "c": "c"
+                }
+
+                selected_language = result["language"].lower()
+                compiler_language = language_map.get(selected_language)
+
+                if compiler_language is None:
+                    st.warning("Execution is not supported for this language.")
+                else:
+                    try:
+                        with st.spinner("Executing improved code..."):
+                            response = requests.post(
+                                "https://api.onlinecompiler.io/api/v2/piston/execute",
+                                headers={
+                                    "Authorization": st.secrets["ONLINE_COMPILER_API_KEY"],
+                                    "Content-Type": "application/json"
+                                },
+                                json={
+                                    "language": compiler_language,
+                                    "version": "*",
+                                    "files": [
+                                        {"content": result["corrected"]}
+                                    ]
+                                },
+                                timeout=45
+                            )
+
+                            response.raise_for_status()
+                            execution_result = response.json()
+                            run_data = execution_result.get("run", {})
+
+                        st.markdown("#### Execution Result")
+                        st.code(
+                            run_data.get("output", "") or "No output",
+                            language="text"
+                        )
+
+                        if run_data.get("code", 0) != 0:
+                            st.warning("The corrected code exited with an error.")
+
+                    except requests.exceptions.RequestException:
+                        st.error(
+                            "Could not reach the code execution service. "
+                            "Please try again later."
+                        )
+                    except Exception:
+                        st.error("Code execution failed. Please try again.")
 
 # ── Code Output ───────────────────────────────────────────────────────────────
 if code.strip():
